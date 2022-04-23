@@ -5,9 +5,10 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-// const encrypt = require("mongoose-encryption");
-// md5
-const bcrypt = require("bcrypt");
+
+const session = require("express-session");
+const passport = require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
 
 const app = express();
 
@@ -17,8 +18,15 @@ app.use(bodyParser.urlencoded({
 }));
 app.use(express.static("public"));
 
-//bcrypt
-const saltRounds = 2;
+//new packages
+app.use(session({
+  secret: "thisismylittlesecret",
+  resave: false,
+  saveUninitialized: false
+}));
+app.use(passport.initialize());
+app.use(passport.session());
+//end new packages
 
 //mongoose
 main().catch(err => console.log(err));
@@ -32,12 +40,16 @@ const userSchema = new mongoose.Schema({
   password: String
 });
 
-// encrypting with a key
-// const secret = process.env.DB_ENCRYPT;
-// userSchema.plugin(encrypt, {secret: secret, encryptedFields: ["password"]});
+//Strategy that hash and salt PWs, save users to mongodb database
+userSchema.plugin(passportLocalMongoose);
 
 const User = mongoose.model("User", userSchema);
 //end mongoose
+
+passport.use(User.createStrategy());
+
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 
 app.get("/", (req, res) => {
   res.render("home");
@@ -48,19 +60,18 @@ app.get("/register", (req, res) => {
 });
 
 app.post("/register", (req, res) => {
-  bcrypt.genSalt(saltRounds, (err, salt) => {
-    bcrypt.hash(req.body.password, salt, (err, hash) => {
-      if (!err) {
-        const newUser = new User({
-          email: req.body.username,
-          password: hash
-        });
-        newUser.save(err => {
-          if (err) console.log(err);
-          else res.render("secrets");
-        });
-      }
-    });
+  //should be passportLocalMongoose method
+  User.register({username: req.body.username}, req.body.password, (err, user) => {
+    if (err) {
+      console.log(err);
+      res.redirect("/register");
+    } else {
+      passport.authenticate("local")(req, res, function() {
+        res.redirect("/secrets");
+        //redirect cause secrets should be available always when authenticated
+        //even if I manually switch to that tab
+      });
+    }
   });
 });
 
@@ -69,24 +80,34 @@ app.get("/login", (req, res) => {
 });
 
 app.post("/login", (req, res) => {
-  const email = req.body.username;
-  const password = req.body.password;
+  const user = new User({
+    username: req.body.username,
+    password: req.body.password
+  });
 
-  User.findOne({email: email}, (err, foundUser) => {
+  req.login(user, (err) => {
     if (err) {
-      console.log(err);
-    } else if (foundUser) {
-      bcrypt.compare(password, foundUser.password, (err, result) => {
-        if (result) {
-          res.render("secrets");
-        } else {
-          console.log(err);
-        }
+      return next(err);
+    } else {
+      passport.authenticate("local", { failureRedirect: '/login', failureMessage: true })(req, res, function() {
+        res.redirect("/secrets");
       });
     }
-  });
+  })
 });
 
+app.get("/secrets", (req, res) => {
+  if (req.isAuthenticated()){
+    res.render("secrets");
+  } else {
+    res.redirect("/login");
+  }
+});
+
+app.get("/logout", (req, res) => {
+  req.logout();
+  res.redirect("/");
+})
 
 
 
