@@ -24,7 +24,7 @@ app.use(express.static("public"));
 
 //new packages
 app.use(session({
-  secret: "thisismylittlesecret",
+  secret: process.env.DB_SECRET,
   resave: false,
   saveUninitialized: false
 }));
